@@ -1,0 +1,84 @@
+{
+  "id": "granizeMonthlyEmailSummary",
+  "name": "Granize - resumo mensal por email",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "nodes": [
+    {
+      "id": "dailySchedule",
+      "name": "Todos os dias às 08h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "loadSummaries",
+      "name": "Buscar resumos do dia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "parameters": {
+        "url": "={{$env.GRANIZE_SITE_URL + '/api/integrations/monthly-summaries'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-granize-secret",
+              "value": "={{$env.N8N_SHARED_SECRET}}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "splitSummaries",
+      "name": "Separar destinatários",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 0],
+      "parameters": {
+        "jsCode": "const summaries = Array.isArray($json.summaries) ? $json.summaries : [];\nreturn summaries.map((summary) => ({ json: summary }));"
+      }
+    },
+    {
+      "id": "sendMailpit",
+      "name": "Enviar email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [780, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.MAILPIT_API_URL + '/api/v1/send'}}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { From: { Email: 'no-reply@granize.local', Name: 'Granize' }, To: [{ Email: $json.email, Name: $json.name }], Subject: $json.subject, Text: $json.text, HTML: $json.html } }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Todos os dias às 08h": {
+      "main": [[{"node": "Buscar resumos do dia", "type": "main", "index": 0}]]
+    },
+    "Buscar resumos do dia": {
+      "main": [[{"node": "Separar destinatários", "type": "main", "index": 0}]]
+    },
+    "Separar destinatários": {
+      "main": [[{"node": "Enviar email", "type": "main", "index": 0}]]
+    }
+  }
+}
