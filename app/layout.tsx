@@ -6,7 +6,7 @@ const roboto = Roboto({ variable: "--font-interface", subsets: ["latin"] });
 const oxanium = Oxanium({ variable: "--font-display", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
+  ...(process.env.APP_URL || process.env.URL ? { metadataBase: new URL(process.env.APP_URL || process.env.URL!) } : {}),
   title: "Granize | Controle financeiro na palma da sua mão",
   description: "Cadastre receitas e despesas, acompanhe o saldo e mantenha seus lançamentos organizados em um painel simples e seguro.",
   icons: { icon: "/granize-mark.png" },

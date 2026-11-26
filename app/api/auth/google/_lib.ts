@@ -1,4 +1,4 @@
-import { ApiError, isLocalRequest, randomToken, runtimeString } from "../../_lib/server";
+import { ApiError, isLocalRequest, publicOrigin, randomToken, runtimeString } from "../../_lib/server";
 
 export type GoogleFlow = { state: string; nonce: string; verifier: string; mode: "login" | "register"; plan: string };
 
@@ -20,10 +20,11 @@ export function googleConfig(request: Request) {
   const clientId = runtimeString("GOOGLE_CLIENT_ID");
   const clientSecret = runtimeString("GOOGLE_CLIENT_SECRET");
   const configuredRedirect = runtimeString("GOOGLE_REDIRECT_URI");
-  const redirectUri = configuredRedirect || (isLocalRequest(request) ? new URL("/api/auth/google/callback", request.url).toString() : "");
+  const redirectUri = configuredRedirect || new URL("/api/auth/google/callback", publicOrigin(request)).toString();
   if (!clientId || !clientSecret || !redirectUri) {
     throw new ApiError(503, "Login com Google ainda não configurado.");
   }
+  if (!isLocalRequest(request) && new URL(redirectUri).origin !== publicOrigin(request)) throw new ApiError(503, "Login com Google ainda não configurado.");
   return { clientId, clientSecret, redirectUri };
 }
 
@@ -67,7 +68,7 @@ export async function verifyGoogleIdToken(idToken: string, clientId: string, non
   if (header.alg !== "RS256" || !header.kid) throw new ApiError(401, "Assinatura de login inválida.");
   const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
   if (!response.ok) throw new ApiError(502, "Não foi possível validar o acesso com o Google.");
-  const jwks = await response.json() as { keys?: JsonWebKey[] };
+  const jwks = await response.json() as { keys?: (JsonWebKey & { kid?: string })[] };
   const jwk = jwks.keys?.find((key) => key.kid === header.kid);
   if (!jwk) throw new ApiError(401, "Chave de autenticação do Google não encontrada.");
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);

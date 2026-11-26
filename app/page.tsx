@@ -1,11 +1,17 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect, @next/next/no-img-element */
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Brand from "./components/Brand";
+import FinancialOverview, { OverviewMonthSelector } from "./components/FinancialOverview";
+import ShoppingList from "./components/ShoppingList";
+import CommandExamples from "./components/CommandExamples";
+import BillingPanel, { CheckoutConfirmation } from "./components/BillingPanel";
+import { isPaidPlan, paidPlans, type BillingStatus } from "./lib/billing";
+import { isOverviewMonth, overviewPeriod, type OverviewData } from "./lib/overview";
 
 type View = "landing" | "auth" | "plans" | "dashboard";
-type DashboardTab = "overview" | "transactions" | "reports" | "profile";
+type DashboardTab = "overview" | "transactions" | "shopping" | "reports" | "profile";
 type TransactionType = "income" | "expense";
 type PlanId = "trial" | "basic" | "pro" | "annual";
 type Transaction = {
@@ -45,6 +51,7 @@ type Profile = {
 };
 type Session = {
   authenticated: boolean;
+  localAuth?: boolean;
   appAuth?: boolean;
   profile?: Profile;
   whatsapp?: WhatsAppConnection | null;
@@ -55,16 +62,17 @@ type Session = {
     currentPeriodEnd: string | null;
   };
   integrations?: { evolution: boolean; n8n: boolean; stripe: boolean };
+  billing?: BillingStatus;
 };
 type Period = { preset: string; from: string; to: string; label: string };
 
 const plans = [
   {
     id: "trial",
-    name: "Teste grátis",
+    name: "Grátis",
     price: "0",
-    cycle: "sem cobrança",
-    note: "Conheça antes de assinar",
+    cycle: "para sempre",
+    note: "Sem prazo para acabar",
     features: [
       "Acesso completo ao painel",
       "Lançamentos e relatórios",
@@ -74,7 +82,7 @@ const plans = [
   {
     id: "basic",
     name: "Básico",
-    price: "12,90",
+    price: (paidPlans.basic.amountCents / 100).toFixed(2).replace(".", ","),
     cycle: "/mês",
     note: "Para começar com tranquilidade",
     features: [
@@ -86,7 +94,7 @@ const plans = [
   {
     id: "pro",
     name: "Pro",
-    price: "59,90",
+    price: (paidPlans.pro.amountCents / 100).toFixed(2).replace(".", ","),
     cycle: "/6 meses",
     note: "O melhor equilíbrio",
     features: [
@@ -98,7 +106,7 @@ const plans = [
   {
     id: "annual",
     name: "Anual",
-    price: "99,90",
+    price: (paidPlans.annual.amountCents / 100).toFixed(2).replace(".", ","),
     cycle: "/ano",
     note: "Maior economia",
     features: ["Tudo do plano Pro", "12 meses de acesso", "Economia no ano"],
@@ -205,7 +213,8 @@ function Landing({
   onPlans: () => void;
 }) {
   return (
-    <main className="landing-page reference-landing">
+    <main className="landing-page">
+      <section className="reference-landing">
       <img
         className="reference-visual"
         src="/hero-granize.png"
@@ -256,6 +265,16 @@ function Landing({
           </span>
         </div>
       </section>
+      </section>
+      <CommandExamples />
+      <footer className="landing-footer">
+        <span>Granize · Controle financeiro pessoal</span>
+        <nav aria-label="Informações e suporte">
+          <a href="/termos">Termos de Uso</a>
+          <a href="/privacidade">Privacidade</a>
+          <a href="mailto:luigi.mywork@gmail.com">Fale com a gente</a>
+        </nav>
+      </footer>
     </main>
   );
 }
@@ -280,7 +299,13 @@ function Auth({
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const code = new URLSearchParams(window.location.search).get("google");
+    if (code === "not_configured") return "O login com Google ainda está sendo configurado. Você pode entrar usando seu e-mail e senha.";
+    if (code === "failed") return "Não foi possível entrar com o Google. Tente novamente ou use seu e-mail e senha.";
+    return "";
+  });
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -288,14 +313,10 @@ function Auth({
     try {
       await api(`/api/auth/${mode === "register" ? "register" : "login"}`, {
         method: "POST",
-        body: JSON.stringify({
-          fullName: name,
-          email,
-          password,
-          plan: selectedPlan,
-        }),
+        body: JSON.stringify({ fullName: name, email, password, plan: selectedPlan }),
       });
-      await refresh();
+      const updatedSession = await refresh();
+      if (!updatedSession.authenticated) throw new Error("Não foi possível iniciar a sessão. Tente entrar novamente.");
       onDone();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao entrar.");
@@ -360,6 +381,8 @@ function Auth({
               <input
                 required
                 minLength={2}
+                name="name"
+                autoComplete="name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Como devemos chamar você?"
@@ -371,31 +394,40 @@ function Auth({
             <input
               required
               type="email"
+              name="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="voce@exemplo.com"
             />
           </label>
           <label>
-            Senha
-            <div className="password-field">
-              <input
-                required
-                minLength={8}
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={
-                  mode === "register" ? "Mínimo de 8 caracteres" : "Sua senha"
-                }
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((value) => !value)}
-              >
-                {showPassword ? "Ocultar" : "Mostrar"}
-              </button>
-            </div>
+              Senha
+              <div className="password-field">
+                <input
+                  required
+                  minLength={8}
+                  maxLength={128}
+                  name="password"
+                  autoComplete={mode === "register" ? "new-password" : "current-password"}
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={
+                    mode === "register" ? "Mínimo de 8 caracteres" : "Sua senha"
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                >
+                  {showPassword ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
           </label>
           {error && (
             <div className="form-error" role="alert">
@@ -432,6 +464,7 @@ function Plans({
   onBack,
   onNeedAccount,
   onDashboard,
+  paymentCancelled = false,
 }: {
   session: Session | null;
   selected: PlanId;
@@ -439,10 +472,11 @@ function Plans({
   onBack: () => void;
   onNeedAccount: () => void;
   onDashboard: () => void;
+  paymentCancelled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const accountReady = Boolean(session?.profile?.onboardingCompleted);
+  const accountReady = Boolean(session?.authenticated && session.profile);
   const stripeReady = Boolean(session?.integrations?.stripe);
   const isTrial = selected === "trial";
   async function checkout() {
@@ -483,11 +517,12 @@ function Plans({
         </span>
         <h1>Escolha o plano ideal</h1>
         <p>
-          Nos planos pagos, o cartão é informado diretamente na página segura da
-          Stripe. A Granize recebe apenas a confirmação do pagamento e não tem
-          acesso aos dados do cartão.
+          O plano Grátis não vence e não precisa de cartão. Nos planos pagos,
+          o pagamento acontece em uma página segura. A Granize não recebe nem
+          armazena os dados do seu cartão.
         </p>
       </header>
+      {paymentCancelled && <p className="billing-cancelled" role="status">Você saiu do pagamento. Seu plano atual foi mantido e o plano Grátis continua disponível.</p>}
       <section className="plans-grid">
         {plans.map((plan) => (
           <button
@@ -496,7 +531,7 @@ function Plans({
             onClick={() => setSelected(plan.id)}
           >
             {plan.id === "trial" && (
-              <span className="popular free">SEM CARTÃO</span>
+              <span className="popular free">SEM PRAZO</span>
             )}
             {plan.id === "pro" && (
               <span className="popular">MAIS ESCOLHIDO</span>
@@ -526,7 +561,7 @@ function Plans({
             className={`status-pill ${isTrial || !accountReady ? "ready" : stripeReady ? "ok" : "waiting"}`}
           >
             {isTrial
-              ? "● Teste grátis sem cartão"
+              ? "● Grátis para sempre, sem cartão"
               : stripeReady
                 ? "● Pagamento seguro"
                 : "● Pagamento em configuração"}
@@ -536,10 +571,10 @@ function Plans({
             {!accountReady
               ? "A criação da conta acontece na próxima etapa."
               : isTrial
-                ? "Comece a usar agora, sem cobrança."
+                ? "Use sem pagar e sem prazo para acabar. Você só assina um plano pago se quiser."
                 : stripeReady
-                  ? "Você será direcionado para concluir a assinatura."
-                  : "Os planos pagos estarão disponíveis quando a Stripe for ativada."}
+                  ? "Você será direcionado para confirmar a assinatura recorrente. É possível cancelar pelo perfil."
+                  : "Os planos pagos estarão disponíveis quando o pagamento for configurado."}
           </p>
         </div>
         <div className="checkout-actions">
@@ -1160,14 +1195,17 @@ function ProfilePanel({
   session,
   onSaved,
   onExit,
+  onPlans,
 }: {
   session: Session;
   onSaved: () => Promise<Session>;
   onExit: () => Promise<void>;
+  onPlans: () => void;
 }) {
   return (
     <section className="profile-panel">
       <ProfileForm session={session} onSaved={onSaved} />
+      <BillingPanel initial={session.billing} onRefresh={onSaved} onPlans={onPlans} />
       <footer className="profile-footer">
         <div>
           <h3>Conta e privacidade</h3>
@@ -1693,16 +1731,25 @@ function Dashboard({
   refreshSession,
   onExit,
   startProfileCompletion = false,
+  onPlans,
+  checkoutSessionId,
+  onCheckoutClose,
 }: {
   session: Session;
   refreshSession: () => Promise<Session>;
   onExit: () => Promise<void>;
   startProfileCompletion?: boolean;
+  onPlans: () => void;
+  checkoutSessionId?: string | null;
+  onCheckoutClose: () => void;
 }) {
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [period, setPeriod] = useState<Period>(monthPeriod());
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState({ incomeCents: 0, expenseCents: 0 });
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [overviewMonth, setOverviewMonth] = useState(() => overviewPeriod().month);
+  const requestSequence = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Transaction | null | undefined>(
@@ -1717,43 +1764,71 @@ function Dashboard({
   const [whatsappLink, setWhatsappLink] = useState<WhatsAppLink | null>(
     session.whatsappLink || null,
   );
-  const loadTransactions = useCallback(async () => {
-    setLoading(true);
+  const loadTransactions = useCallback(async (quiet = false) => {
+    const requestId = ++requestSequence.current;
+    if (!quiet) setLoading(true);
     setError("");
     try {
-      const selectedPeriod = tab === "overview" ? monthPeriod() : period;
+      if (tab === "overview") {
+        const data = await api<OverviewData>(`/api/dashboard?month=${encodeURIComponent(overviewMonth)}`);
+        if (requestId !== requestSequence.current) return;
+        setOverview(data);
+        setSummary(data.totals);
+        return;
+      }
+      if (tab === "shopping") return;
+      const selectedPeriod = period;
       const result = await api<{
         transactions: Transaction[];
         summary: { incomeCents: number; expenseCents: number };
       }>(`/api/transactions?${queryPeriod(selectedPeriod)}`);
+      if (requestId !== requestSequence.current) return;
       setTransactions(result.transactions);
       setSummary({
         incomeCents: Number(result.summary.incomeCents),
         expenseCents: Number(result.summary.expenseCents),
       });
     } catch (reason) {
+      if (requestId !== requestSequence.current) return;
       setError(
         reason instanceof Error
           ? reason.message
           : "Não foi possível carregar os dados.",
       );
     } finally {
-      setLoading(false);
+      if (requestId === requestSequence.current) setLoading(false);
     }
-  }, [period, tab]);
+  }, [overviewMonth, period, tab]);
   useEffect(() => {
+    const requests = requestSequence;
     void loadTransactions();
-  }, [loadTransactions]);
+    if (tab !== "overview") return () => { requests.current++; };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadTransactions(true);
+    }, 30000);
+    const onFocus = () => void loadTransactions(true);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      requests.current++;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loadTransactions, tab]);
   useEffect(() => {
     setWhatsappConnection(session.whatsapp || null);
     setWhatsappLink(session.whatsappLink || null);
   }, [session.whatsapp, session.whatsappLink]);
+  function selectOverviewMonth(month: string) {
+    if (!isOverviewMonth(month) || month === overviewMonth) return;
+    requestSequence.current++;
+    setOverviewMonth(month);
+    setOverview(null);
+    setLoading(true);
+    setError("");
+  }
   const balance = summary.incomeCents - summary.expenseCents;
   const firstName = session.profile?.fullName?.split(" ")[0] || "Usuário";
   const budget = Number(session.profile?.monthlyBudgetCents || 0);
-  const budgetPercent = budget
-    ? Math.min(100, Math.round((summary.expenseCents / budget) * 100))
-    : 0;
   const profileComplete = Boolean(session.profile?.profileCompleted);
   async function remove(transaction: Transaction) {
     if (!window.confirm(`Excluir “${transaction.description}”?`)) return;
@@ -1787,10 +1862,7 @@ function Dashboard({
     }
   }
   const headings: Record<DashboardTab, [string, string]> = {
-    overview: [
-      `Olá, ${firstName}`,
-      "Aqui está seu resumo financeiro atualizado.",
-    ],
+    overview: [`Olá, ${firstName}`, ""],
     transactions: [
       "Seus lançamentos",
       "Cadastre, filtre, edite ou exclua receitas e despesas.",
@@ -1800,6 +1872,7 @@ function Dashboard({
       "Exporte os dados do período selecionado.",
     ],
     profile: ["Perfil do usuário", "Atualize seus dados e preferências."],
+    shopping: ["Lista de compras", "Organize os produtos que faltam em casa."],
   };
   return (
     <main className="app-shell">
@@ -1807,11 +1880,12 @@ function Dashboard({
         <Brand inverse />
         <nav>
           {(
-            ["overview", "transactions", "reports", "profile"] as DashboardTab[]
+            ["overview", "transactions", "shopping", "reports", "profile"] as DashboardTab[]
           ).map((item) => {
             const labels = {
               overview: ["⌂", "Visão geral"],
               transactions: ["↕", "Lançamentos"],
+              shopping: ["☷", "Lista de compras"],
               reports: ["▤", "Relatórios"],
               profile: ["◎", "Perfil"],
             };
@@ -1832,9 +1906,11 @@ function Dashboard({
           <span>
             <b>{session.profile?.fullName || firstName}</b>
             <small>
-              {session.subscription?.status === "active"
-                ? `Plano ${session.subscription.plan}`
-                : "Teste grátis"}
+              {session.subscription?.plan === "trial"
+                ? "Plano Grátis"
+                : session.subscription?.status === "active"
+                  ? `Plano ${plans.find((plan) => plan.id === session.subscription?.plan)?.name || session.subscription.plan}`
+                  : "Assinatura pendente"}
             </small>
           </span>
           <button onClick={() => void onExit()} aria-label="Sair">
@@ -1849,7 +1925,7 @@ function Dashboard({
               <Brand />
             </span>
             <h1>{headings[tab][0]}</h1>
-            <p>{headings[tab][1]}</p>
+            {headings[tab][1] && <p>{headings[tab][1]}</p>}
           </div>
           <div className="top-actions">
             {(tab === "overview" || tab === "transactions") && (
@@ -1863,6 +1939,7 @@ function Dashboard({
           </div>
         </header>
         <div className="dashboard-body">
+          {checkoutSessionId && <CheckoutConfirmation sessionId={checkoutSessionId} onRefresh={refreshSession} onClose={onCheckoutClose} />}
           {error && (
             <div className="page-error">
               <span>!</span>
@@ -1885,76 +1962,17 @@ function Dashboard({
                   onConnect={() => setConnectingWhatsApp(true)}
                 />
               )}
-              <section className="balance-hero">
-                <div>
-                   <span>Saldo neste mês</span>
-                  <strong>{formatMoney(balance)}</strong>
-                  <small>
-                    {transactions.length} lançamentos considerados no período
-                  </small>
-                </div>
-                <div className="balance-decoration">
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              </section>
-              <section className="stat-grid">
-                <article className="stat income">
-                  <div>
-                    <span>↓</span>
-                    <small>Total de receitas</small>
-                  </div>
-                  <strong>{formatMoney(summary.incomeCents)}</strong>
-                  <p>
-                    {
-                      transactions.filter((item) => item.type === "income")
-                        .length
-                    }{" "}
-                    lançamentos
-                  </p>
-                </article>
-                <article className="stat expense">
-                  <div>
-                    <span>↑</span>
-                    <small>Total de despesas</small>
-                  </div>
-                  <strong>{formatMoney(summary.expenseCents)}</strong>
-                  <p>
-                    {
-                      transactions.filter((item) => item.type === "expense")
-                        .length
-                    }{" "}
-                    lançamentos
-                  </p>
-                </article>
-              </section>
-              {budget > 0 && (
-                <section className="budget-card">
-                  <div>
-                    <span>Orçamento mensal</span>
-                    <strong>
-                      {formatMoney(summary.expenseCents)} de{" "}
-                      {formatMoney(budget)}
-                    </strong>
-                  </div>
-                  <div className="budget-track">
-                    <i style={{ width: `${budgetPercent}%` }} />
-                  </div>
-                  <b className={budgetPercent >= 90 ? "danger-text" : ""}>
-                    {budgetPercent}% utilizado
-                  </b>
-                </section>
-              )}
-              <TransactionPanel
-                title="Lançamentos recentes"
+              <OverviewMonthSelector month={overviewMonth} onChange={selectOverviewMonth} />
+              <FinancialOverview
+                data={overview}
                 loading={loading}
-                transactions={transactions.slice(0, 5)}
-                total={transactions.length}
+                budget={budget}
+                onProfile={() => setTab("profile")}
                 onAdd={() => setEditing(null)}
-                onEdit={setEditing}
-                onRemove={remove}
-                onViewAll={() => setTab("transactions")}
+                onViewAll={() => {
+                  if (overview) setPeriod({ preset: "custom", from: overview.from, to: overview.to, label: "Mês selecionado" });
+                  setTab("transactions");
+                }}
               />
             </>
           )}
@@ -2041,12 +2059,14 @@ function Dashboard({
               </section>
             </>
           )}
+          {tab === "shopping" && <ShoppingList connected={Boolean(whatsappLink)} onConnect={() => profileComplete ? setConnectingWhatsApp(true) : setCompletingProfile(true)} />}
           {tab === "profile" &&
             (profileComplete ? (
               <ProfilePanel
                 session={session}
                 onSaved={refreshSession}
                 onExit={onExit}
+                onPlans={onPlans}
               />
             ) : (
               <CompleteProfileCard
@@ -2060,7 +2080,7 @@ function Dashboard({
         <TransactionModal
           transaction={editing}
           onClose={() => setEditing(undefined)}
-          onSaved={loadTransactions}
+          onSaved={() => loadTransactions()}
         />
       )}
       {completingProfile && (
@@ -2112,6 +2132,8 @@ export default function Home() {
   const [selectedPlan, setSelectedPlan] = useState<PlanId>("trial");
   const [session, setSession] = useState<Session | null>(null);
   const [promptProfileCompletion, setPromptProfileCompletion] = useState(false);
+  const [checkoutSessionId, setCheckoutSessionId] = useState<string | null>(null);
+  const [paymentCancelled, setPaymentCancelled] = useState(false);
   const refreshSession = useCallback(async () => {
     try {
       const next = await api<Session>("/api/me");
@@ -2126,6 +2148,12 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     void refreshSession().then((next) => {
+      if (next.authenticated && (params.get("continue_checkout") === "1" || params.get("view") === "plans")) {
+        if (isPaidPlan(params.get("plan"))) setSelectedPlan(params.get("plan") as PlanId);
+        setPaymentCancelled(params.get("checkout") === "cancelled");
+        setView("plans");
+        return;
+      }
       if (
         next.authenticated &&
         (params.get("checkout") === "success" ||
@@ -2133,9 +2161,11 @@ export default function Home() {
           params.get("google") === "success")
       ) {
         setPromptProfileCompletion(params.get("complete_profile") === "1");
+        if (params.get("checkout") === "success") setCheckoutSessionId(params.get("session_id"));
+        if (params.get("billing") === "refresh") void api("/api/billing/status?refresh=1").then(() => refreshSession()).catch(() => undefined);
         setView("dashboard");
       } else if (params.get("google") === "account_missing") setView("plans");
-      else if (params.get("google") === "failed") {
+      else if (["failed", "not_configured"].includes(params.get("google") || "")) {
         setAuthMode("login");
         setView("auth");
       }
@@ -2146,7 +2176,7 @@ export default function Home() {
       setView("landing");
   }, [session, view]);
   async function logout() {
-    if (session?.authenticated)
+    if (session?.appAuth || session?.localAuth)
       await api("/api/auth/logout", { method: "POST", body: "{}" }).catch(
         () => null,
       );
@@ -2159,7 +2189,7 @@ export default function Home() {
         mode={authMode}
         selectedPlan={selectedPlan}
         refresh={refreshSession}
-        onDone={() => setView("dashboard")}
+        onDone={() => setView(authMode === "register" && isPaidPlan(selectedPlan) ? "plans" : "dashboard")}
         onBack={() => setView(authMode === "register" ? "plans" : "landing")}
         onChoosePlan={() => setView("plans")}
       />
@@ -2176,6 +2206,7 @@ export default function Home() {
           setView("auth");
         }}
         onDashboard={() => setView("dashboard")}
+        paymentCancelled={paymentCancelled}
       />
     );
   if (view === "dashboard" && session?.authenticated)
@@ -2185,6 +2216,14 @@ export default function Home() {
         refreshSession={refreshSession}
         onExit={logout}
         startProfileCompletion={promptProfileCompletion}
+        onPlans={() => { setPaymentCancelled(false); setView("plans"); }}
+        checkoutSessionId={checkoutSessionId}
+        onCheckoutClose={() => {
+          setCheckoutSessionId(null);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("checkout"); url.searchParams.delete("session_id");
+          window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+        }}
       />
     );
   return (

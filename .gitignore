@@ -39,9 +39,16 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+/output/
+/tmp/
+/.netlify/
+/supabase/.temp/
+/Configurar-Gmail.ps1
+/Configurar-Google.ps1
+/Corrigir-Google.ps1
 
-# integration runtime
-/infrastructure/docker/.env
+# local integration runtime
+/infra/local/.env
 .granize-web.log
 .granize-web-error.log
 *.tsbuildinfo

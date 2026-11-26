@@ -1,4 +1,4 @@
-import { errorResponse } from "../../../_lib/server";
+import { ApiError, publicOrigin } from "../../../_lib/server";
 import { createGoogleFlow, googleConfig, googleFlowCookie } from "../_lib";
 
 const plans = new Set(["trial", "basic", "pro", "annual"]);
@@ -24,5 +24,8 @@ export async function GET(request: Request) {
       prompt: "select_account",
     }).toString();
     return new Response(null, { status: 302, headers: { Location: authorization.toString(), "Set-Cookie": googleFlowCookie(flow, request) } });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) {
+    const code = error instanceof ApiError && error.status === 503 ? "not_configured" : "failed";
+    return Response.redirect(new URL(`/?google=${code}`, publicOrigin(request)), 302);
+  }
 }

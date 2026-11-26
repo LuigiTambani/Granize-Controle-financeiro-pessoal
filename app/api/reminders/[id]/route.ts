@@ -1,5 +1,5 @@
 import { ApiError, errorResponse, getD1, requireApiUser } from "../../_lib/server";
-import { validateReminder } from "../route";
+import { validateReminder } from "../../_lib/reminders";
 
 type Context = { params: Promise<{ id: string }> };
 

@@ -1,9 +1,11 @@
 import { ApiError, errorResponse, getD1, getProfileImages, getRequestUser, hasAppSession, isLocalRequest, requireApiUser, runtimeString, sessionCookie } from "../_lib/server";
+import { statusFor, stripeConfigured, stripeMode, subscriptionRow } from "../_lib/stripe";
+import { effectiveSubscription } from "../../lib/billing";
 
 export async function GET(request: Request) {
   try {
     const identity = await getRequestUser(request);
-    if (!identity) return Response.json({ authenticated: false, appAuth: false });
+    if (!identity) return Response.json({ authenticated: false, localAuth: true, appAuth: false }, { headers: { "Cache-Control": "private, no-store" } });
     const user = await requireApiUser(request);
     const db = getD1();
     const profile = await db.prepare(`SELECT id, email, full_name AS fullName, phone,
@@ -17,18 +19,20 @@ export async function GET(request: Request) {
       FROM users WHERE id = ?`).bind(user.id).first();
     const whatsapp = await db.prepare("SELECT instance_name AS instanceName, status, phone FROM whatsapp_bot_connections WHERE id = 'primary'").first();
     const whatsappLink = await db.prepare("SELECT phone, verified_at AS verifiedAt FROM whatsapp_user_links WHERE user_id = ?").bind(user.id).first();
-    const subscription = await db.prepare("SELECT plan, status, current_period_end AS currentPeriodEnd FROM subscriptions WHERE user_id = ?").bind(user.id).first();
+    const subscription = await subscriptionRow(user.id);
     return Response.json({
       authenticated: true,
+      localAuth: true,
       appAuth: hasAppSession(request),
       profile,
       whatsapp,
       whatsappLink: whatsappLink || null,
-      subscription: subscription || { plan: "none", status: "inactive", currentPeriodEnd: null },
+      subscription: effectiveSubscription(subscription, stripeMode()),
+      billing: statusFor(subscription),
       integrations: {
         evolution: Boolean(runtimeString("EVOLUTION_API_URL") && runtimeString("EVOLUTION_API_KEY")),
         n8n: Boolean(runtimeString("N8N_WEBHOOK_URL") && runtimeString("N8N_SHARED_SECRET")),
-        stripe: Boolean(runtimeString("STRIPE_SECRET_KEY")),
+        stripe: stripeConfigured(),
       },
     });
   } catch (error) {
@@ -66,13 +70,13 @@ export async function POST(request: Request) {
         financial_goal = ?, preferred_summary_day = ?, monthly_budget_cents = ?, email_notifications = ?,
         browser_notifications = ?, onboarding_completed = CASE WHEN ? = 1 THEN 1 ELSE onboarding_completed END,
         profile_completed = CASE WHEN ? = 1 THEN 1 ELSE profile_completed END,
-        terms_accepted_at = CASE WHEN ? = 1 THEN COALESCE(terms_accepted_at, CURRENT_TIMESTAMP) ELSE terms_accepted_at END,
-        privacy_accepted_at = CASE WHEN ? = 1 THEN COALESCE(privacy_accepted_at, CURRENT_TIMESTAMP) ELSE privacy_accepted_at END,
+        terms_accepted_at = CASE WHEN ? = 1 THEN COALESCE(terms_accepted_at, ?) ELSE terms_accepted_at END,
+        privacy_accepted_at = CASE WHEN ? = 1 THEN COALESCE(privacy_accepted_at, ?) ELSE privacy_accepted_at END,
         updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).bind(fullName, phone, birthDate, country, currency, financialGoal, preferredSummaryDay,
       monthlyBudgetCents, payload.emailNotifications ? 1 : 0, payload.browserNotifications === false ? 0 : 1,
       payload.onboardingCompleted || payload.completeProfile ? 1 : 0, payload.completeProfile ? 1 : 0,
-      payload.acceptTerms ? 1 : 0, payload.acceptPrivacy ? 1 : 0, user.id).run();
+      payload.acceptTerms ? 1 : 0, new Date().toISOString(), payload.acceptPrivacy ? 1 : 0, new Date().toISOString(), user.id).run();
     return Response.json({ ok: true });
   } catch (error) {
     return errorResponse(error);

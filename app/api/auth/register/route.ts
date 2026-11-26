@@ -1,8 +1,9 @@
-import { ApiError, ensureSchema, errorResponse, getD1, randomToken } from "../../_lib/server";
-import { createSession, passwordHash, validEmail, validatePassword } from "../_lib";
+import { ApiError, ensureSchema, errorResponse, getD1, requireSameOrigin, randomToken } from "../../_lib/server";
+import { consumeAuthAttempt, createSession, passwordHash, validEmail, validatePassword } from "../_lib";
 
 export async function POST(request: Request) {
   try {
+    requireSameOrigin(request);
     await ensureSchema();
     const payload = await request.json() as { fullName?: string; email?: string; password?: string };
     const fullName = payload.fullName?.trim().slice(0, 100) || "";
@@ -11,6 +12,7 @@ export async function POST(request: Request) {
     if (fullName.length < 2) throw new ApiError(400, "Informe seu nome completo.");
     if (!validEmail(email)) throw new ApiError(400, "Informe um e-mail válido.");
     validatePassword(password);
+    await consumeAuthAttempt(request, email, "register");
     const exists = await getD1().prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
     if (exists) throw new ApiError(409, "Já existe uma conta com este e-mail.");
     const id = crypto.randomUUID();

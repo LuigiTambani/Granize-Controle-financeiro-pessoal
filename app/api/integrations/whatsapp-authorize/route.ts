@@ -27,8 +27,8 @@ export async function POST(request: Request) {
         FROM whatsapp_link_tokens AS tokens
         JOIN users ON users.id = tokens.user_id
         LEFT JOIN subscriptions ON subscriptions.user_id = tokens.user_id
-        WHERE tokens.token_hash = ? AND tokens.used_at IS NULL AND tokens.expires_at > CURRENT_TIMESTAMP
-      `).bind(await sha256(codeMatch[1])).first<{ id: string; userId: string; fullName: string; subscriptionStatus: string }>();
+        WHERE tokens.token_hash = ? AND tokens.used_at IS NULL AND tokens.expires_at > ?
+      `).bind(await sha256(codeMatch[1]), new Date().toISOString()).first<{ id: string; userId: string; fullName: string; subscriptionStatus: string }>();
       if (!token) return Response.json({ authorized: false, action: "link_invalid", responseText: "Esse código expirou ou já foi utilizado. Gere um novo QR Code no painel da Granize." });
       if (!subscriptionAllowsBot(token.subscriptionStatus)) {
         return Response.json({ authorized: false, action: "subscription_inactive", responseText: "Seu acesso ao bot não está ativo. Entre no painel da Granize para escolher ou renovar seu plano." });

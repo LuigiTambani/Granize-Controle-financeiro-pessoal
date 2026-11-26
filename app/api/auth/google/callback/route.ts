@@ -1,6 +1,7 @@
 import { ApiError, ensureSchema, errorResponse, getD1 } from "../../../_lib/server";
 import { createSession } from "../../_lib";
 import { clearGoogleFlowCookie, googleConfig, readGoogleFlow, verifyGoogleIdToken } from "../_lib";
+import { isPaidPlan } from "../../../../lib/billing";
 
 type Account = { id: string; email: string; googleSub: string | null };
 
@@ -50,17 +51,16 @@ export async function GET(request: Request) {
         await db.batch([
           db.prepare("INSERT INTO users (id, email, full_name, google_sub, onboarding_completed, profile_completed) VALUES (?, ?, ?, ?, 0, 0)")
             .bind(id, google.email, google.name, google.sub),
-          db.prepare("INSERT INTO subscriptions (user_id, provider, plan, status) VALUES (?, 'google', ?, ?)")
-            .bind(id, flow.plan, flow.plan === "trial" ? "active" : "inactive"),
+          db.prepare("INSERT INTO subscriptions (user_id, provider, plan, status) VALUES (?, 'google', 'trial', 'active')").bind(id),
         ]);
         account = { id, email: google.email, googleSub: google.sub };
         createdAccount = true;
       }
     }
     const appSession = await createSession(account.id, request);
-    const destination = createdAccount
-      ? "/?google=success&complete_profile=1"
-      : "/?google=success";
+    const destination = flow.mode === "register" && isPaidPlan(flow.plan)
+      ? `/?google=success&continue_checkout=1&plan=${flow.plan}`
+      : createdAccount ? "/?google=success&complete_profile=1" : "/?google=success";
     return redirect(request, destination, [clearFlow, appSession]);
   } catch (error) {
     console.error(error);

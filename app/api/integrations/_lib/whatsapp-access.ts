@@ -1,4 +1,5 @@
-import { getD1 } from "../../_lib/server";
+import { getD1, runtimeString } from "../../_lib/server";
+import { effectiveSubscription, type SubscriptionRecord } from "../../../lib/billing";
 
 export function normalizeWhatsAppPhone(value: string) {
   const digits = value.replace(/\D/g, "");
@@ -21,15 +22,20 @@ export type WhatsAppAccess = {
 export async function findWhatsAppAccess(phone: string) {
   const normalized = normalizeWhatsAppPhone(phone);
   if (normalized.length < 12 || normalized.length > 13) return null;
-  return getD1().prepare(`
+  const row = await getD1().prepare(`
     SELECT links.user_id AS userId, users.full_name AS fullName, links.phone,
       COALESCE(subscriptions.plan, 'none') AS plan,
-      COALESCE(subscriptions.status, 'inactive') AS subscriptionStatus
+      COALESCE(subscriptions.status, 'inactive') AS subscriptionStatus,
+      subscriptions.provider, subscriptions.status, subscriptions.current_period_end AS currentPeriodEnd,
+      subscriptions.stripe_mode AS stripeMode
     FROM whatsapp_user_links AS links
     JOIN users ON users.id = links.user_id
     LEFT JOIN subscriptions ON subscriptions.user_id = links.user_id
     WHERE links.phone = ?
-  `).bind(normalized).first<WhatsAppAccess>();
+  `).bind(normalized).first<WhatsAppAccess & SubscriptionRecord>();
+  if (!row) return null;
+  const effective = effectiveSubscription(row, runtimeString("STRIPE_MODE") === "live" ? "live" : "test");
+  return { userId: row.userId, fullName: row.fullName, phone: row.phone, plan: effective.plan, subscriptionStatus: effective.status };
 }
 
 export async function requireActiveWhatsAppAccess(phone: string) {

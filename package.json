@@ -2,20 +2,26 @@
   "name": "granize",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.25.0",
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev --hostname 0.0.0.0",
-    "build": "vinext build",
-    "start": "vinext start",
-    "test": "pnpm run build && node --test tests/interface.test.mjs",
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build --webpack",
+    "start": "next start --hostname 0.0.0.0",
+    "dev:legacy": "vinext dev --hostname 0.0.0.0",
+    "build:legacy": "vinext build",
+    "test": "pnpm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.119.2",
     "drizzle-orm": "0.45.2",
+    "next": "16.4.6",
     "pdf-lib": "^1.17.1",
+    "pg": "8.23.1",
     "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -23,9 +29,11 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
     "@eslint/js": "9.39.4",
+    "@netlify/plugin-nextjs": "5.16.9",
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
+    "@types/pg": "8.16.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
